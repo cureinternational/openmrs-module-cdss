@@ -35,6 +35,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -330,8 +331,12 @@ public class MedicationRequestBuilderTest {
     }
 
     private List<Order> getDrugOrders() {
+        return Collections.singletonList(getDrugOrder("order-uuid"));
+    }
+
+    private Order getDrugOrder(String uuid) {
         DrugOrder drugOrder = new DrugOrder();
-        drugOrder.setUuid("order-uuid");
+        drugOrder.setUuid(uuid);
         Drug drug = new Drug();
         DrugReferenceMap referenceMap = new DrugReferenceMap();
         ConceptReferenceTerm conceptReferenceTerm = new ConceptReferenceTerm();
@@ -342,7 +347,7 @@ public class MedicationRequestBuilderTest {
         drugOrder.setDose(1.0);
         drugOrder.setDoseUnits(getMockConcept("ml", "ml", false));
         drugOrder.setRoute(getMockConcept("Oral", "PO", false));
-        return Collections.singletonList(drugOrder);
+        return drugOrder;
     }
 
     private Bundle getMockRequestBundle(String fileName) throws Exception {
