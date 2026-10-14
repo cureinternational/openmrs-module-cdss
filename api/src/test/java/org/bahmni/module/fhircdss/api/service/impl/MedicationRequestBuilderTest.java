@@ -385,7 +385,6 @@ public class MedicationRequestBuilderTest {
 
     private List<Order> getDrugOrders() {
         return Collections.singletonList(getDrugOrder("order-uuid"));
-        return Arrays.asList(getDrugOrder("order-uuid"));
     }
 
     private Order getDrugOrder(String uuid) {
