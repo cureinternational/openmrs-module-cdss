@@ -17,6 +17,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnitRunner;
 import org.bahmni.module.fhircdss.api.util.OrderFrequencyValue;
+import org.openmrs.CareSetting;
 import org.openmrs.Concept;
 import org.openmrs.ConceptName;
 import org.openmrs.ConceptReferenceTerm;
@@ -45,6 +46,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -91,6 +94,22 @@ public class MedicationRequestBuilderTest {
 
         assertEquals(1, inputMedicationEntries.size());
         assertEquals(2, resultMedicationEntries.size());
+    }
+
+    @Test
+    public void shouldFetchActiveMedicationOrdersForOutpatientAndInpatientCareSettings() throws Exception {
+        Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
+        MedicationRequest medicationRequest = new MedicationRequest();
+        addDummyDosageInstruction(medicationRequest, "ml", 2.0, "Once a day");
+
+        when(orderService.getActiveOrders(any(), any(), any(), any())).thenReturn(getDrugOrders());
+        when(fhirMedicationRequestService.get(anyString())).thenReturn(medicationRequest);
+
+        medicationRequestBuilder.build(mockRequestBundle);
+
+        verify(orderService).getCareSettingByName(CareSetting.CareSettingType.OUTPATIENT.toString());
+        verify(orderService).getCareSettingByName(CareSetting.CareSettingType.INPATIENT.toString());
+        verify(orderService, times(2)).getActiveOrders(any(), any(), any(), any());
     }
 
     @Test
