@@ -1,6 +1,9 @@
 package org.bahmni.module.fhircdss.api.service.impl;
 
 import ca.uhn.fhir.context.FhirContext;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import org.hl7.fhir.r4.model.Bundle;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.Coding;
@@ -370,6 +373,59 @@ public class MedicationRequestBuilderTest {
         assertEquals("NA", finalRoute);
     }
 
+    @Test
+    public void shouldExpandDosingStagesIntoSeparateDosageInstructions_whenActiveOrderIsVariableDoseProtocol() throws Exception {
+        Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
+        // fhir2 translates a VDP order into a dosage with an empty doseAndRate, because the order row itself has no dose
+        MedicationRequest medicationRequest = new MedicationRequest();
+        medicationRequest.setId("order-uuid");
+        medicationRequest.setDosageInstruction(Collections.singletonList(new Dosage()));
+
+        when(orderService.getActiveOrders(any(), any(), any(), any())).thenReturn(Collections.singletonList(getVariableDoseDrugOrder("order-uuid")));
+        when(fhirMedicationRequestService.get(anyString())).thenReturn(medicationRequest);
+        when(orderFrequencyResolver.resolve("Twice a day")).thenReturn(new OrderFrequencyValue(2, 1, "d"));
+
+        Bundle medicationBundle = medicationRequestBuilder.build(mockRequestBundle);
+
+        List<Bundle.BundleEntryComponent> resultMedicationEntries = medicationBundle.getEntry().stream().filter(entry -> ResourceType.MedicationRequest.equals(entry.getResource().getResourceType())).collect(Collectors.toList());
+
+        assertEquals(2, resultMedicationEntries.size());
+        MedicationRequest activeOrderRequest = (MedicationRequest) resultMedicationEntries.get(0).getResource();
+        assertEquals(2, activeOrderRequest.getDosageInstruction().size());
+
+        Dosage loadingStage = activeOrderRequest.getDosageInstruction().get(0);
+        assertEquals(20.0, loadingStage.getDoseAndRate().get(0).getDoseQuantity().getValue().doubleValue(), 0.0);
+        assertEquals("mL", loadingStage.getDoseAndRate().get(0).getDoseQuantity().getUnit());
+        assertEquals("O", loadingStage.getRoute().getText());
+
+        Dosage maintenanceStage = activeOrderRequest.getDosageInstruction().get(1);
+        assertEquals(10.0, maintenanceStage.getDoseAndRate().get(0).getDoseQuantity().getValue().doubleValue(), 0.0);
+        assertEquals("mL", maintenanceStage.getDoseAndRate().get(0).getDoseQuantity().getUnit());
+        assertEquals(2, maintenanceStage.getTiming().getRepeat().getFrequency());
+        assertEquals("O", maintenanceStage.getRoute().getText());
+    }
+
+    @Test
+    public void shouldKeepTranslatedDosage_whenActiveOrderHasNoDosingStages() throws Exception {
+        Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
+        MedicationRequest medicationRequest = new MedicationRequest();
+        medicationRequest.setId("order-uuid");
+        addDummyDosageInstruction(medicationRequest, "ml", 2.0, "Once a day");
+
+        when(orderService.getActiveOrders(any(), any(), any(), any())).thenReturn(getDrugOrders());
+        when(fhirMedicationRequestService.get(anyString())).thenReturn(medicationRequest);
+
+        Bundle medicationBundle = medicationRequestBuilder.build(mockRequestBundle);
+
+        List<Bundle.BundleEntryComponent> resultMedicationEntries = medicationBundle.getEntry().stream().filter(entry -> ResourceType.MedicationRequest.equals(entry.getResource().getResourceType())).collect(Collectors.toList());
+
+        assertEquals(2, resultMedicationEntries.size());
+        MedicationRequest activeOrderRequest = (MedicationRequest) resultMedicationEntries.get(0).getResource();
+        assertEquals(1, activeOrderRequest.getDosageInstruction().size());
+        assertEquals(2.0, activeOrderRequest.getDosageInstruction().get(0).getDoseAndRate().get(0).getDoseQuantity().getValue().doubleValue(), 0.0);
+        assertEquals("mL", activeOrderRequest.getDosageInstruction().get(0).getDoseAndRate().get(0).getDoseQuantity().getUnit());
+    }
+
     private static String getDoseUnitFromBundleEntry(Bundle.BundleEntryComponent bundleEntryComponent) {
         return ((MedicationRequest) bundleEntryComponent.getResource()).getDosageInstruction().get(0).getDoseAndRate().get(0).getDoseQuantity().getUnit();
     }
@@ -434,6 +490,30 @@ public class MedicationRequestBuilderTest {
         dosage.setTiming(timing);
         dosage.setRoute(getMockCodeableConcept("Oral", "dummySystem", "dummyCode"));
         medicationRequest.setDosageInstruction((Collections.singletonList(dosage)));
+    }
+
+    private DrugOrder getVariableDoseDrugOrder(String uuid) {
+        DrugOrder drugOrder = (DrugOrder) getDrugOrder(uuid);
+        try {
+            String loadingStage = "{\"sequence\":1,\"text\":\"Loading\","
+                    + "\"timing\":{\"repeat\":{\"count\":1}},"
+                    + "\"route\":{\"text\":\"Oral\"},"
+                    + "\"doseAndRate\":[{\"type\":{\"text\":\"ordered\"},\"doseQuantity\":{\"value\":20.0,\"unit\":\"ml\"}}]}";
+            String maintenanceStage = "{\"sequence\":2,\"text\":\"Maintenance\","
+                    + "\"timing\":{\"code\":{\"text\":\"Twice a day\"},\"repeat\":{\"duration\":5,\"durationUnit\":\"d\"}},"
+                    + "\"route\":{\"text\":\"Oral\"},"
+                    + "\"doseAndRate\":[{\"type\":{\"text\":\"ordered\"},\"doseQuantity\":{\"value\":10.0,\"unit\":\"ml\"}}]}";
+            ObjectMapper objectMapper = new ObjectMapper();
+            ObjectNode dosingInstructions = objectMapper.createObjectNode();
+            dosingInstructions.put("dosingInstructionType", "org.openmrs.module.bahmniemrapi.drugorder.dosinginstructions.FhirDosingInstructions");
+            dosingInstructions.put("administrationInstructions", "[" + loadingStage + "," + maintenanceStage + "]");
+            dosingInstructions.put("doseUnits", "mg");
+            dosingInstructions.put("route", "Oral");
+            drugOrder.setDosingInstructions(objectMapper.writeValueAsString(dosingInstructions));
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+        return drugOrder;
     }
 
     private CodeableConcept getMockCodeableConcept(String frequencyText, String dummySystem, String dummyCode) {

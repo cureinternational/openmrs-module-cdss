@@ -1,5 +1,7 @@
 package org.bahmni.module.fhircdss.api.service.impl;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.log4j.Logger;
 import org.bahmni.module.fhircdss.api.service.RequestBuilder;
 import org.bahmni.module.fhircdss.api.util.CdssUtils;
@@ -28,6 +30,7 @@ import org.openmrs.module.fhir2.api.FhirMedicationRequestService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -79,6 +82,7 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
             MedicationRequest medicationRequest = fhirMedicationRequestService.get(order.getUuid());
             CodeableConcept codeableConcept = getCodeableConceptForMedicationRequest(order);
             medicationRequest.setMedication(codeableConcept);
+            applyDosingStages((DrugOrder) order, medicationRequest);
             addEntryToMedicationBundle(medicationBundle, medicationRequest);
         }
         return medicationBundle;
@@ -109,6 +113,55 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
         return codeableConcept;
     }
 
+    /**
+     * Variable dose protocol orders store one FHIR Dosage per stage inside
+     * dosingInstructions.administrationInstructions, while the order row itself carries no dose -
+     * so fhir2 translates them into a single dosage with an empty doseAndRate.
+     * Replaces that placeholder with the actual per-stage dosages, one dosageInstruction per stage.
+     */
+    private void applyDosingStages(DrugOrder drugOrder, MedicationRequest medicationRequest) {
+        List<Dosage> stageDosages = parseDosingStages(drugOrder);
+        if (stageDosages.isEmpty()) {
+            return;
+        }
+        // replace the placeholder with the real per-stage dosages
+        medicationRequest.setDosageInstruction(new ArrayList<>(stageDosages));
+        logger.info("Expanded " + stageDosages.size() + " dosing stages for variable dose order '" + drugOrder.getUuid() + "'");
+    }
+
+    private List<Dosage> parseDosingStages(DrugOrder drugOrder) {
+        List<Dosage> dosages = new ArrayList<>();
+        try {
+            String dosingInstructionsJson = drugOrder.getDosingInstructions();
+            if (dosingInstructionsJson == null || dosingInstructionsJson.trim().isEmpty()) {
+                return dosages;
+            }
+            ObjectMapper objectMapper = new ObjectMapper();
+            JsonNode dosingInstructions = objectMapper.readTree(dosingInstructionsJson);
+            JsonNode administrationInstructions = dosingInstructions.get("administrationInstructions");
+            if (administrationInstructions == null) {
+                return dosages;
+            }
+            if (administrationInstructions.isTextual()) {
+                administrationInstructions = objectMapper.readTree(administrationInstructions.asText());
+            }
+            if (!administrationInstructions.isArray()) {
+                return dosages;
+            }
+            // HAPI can only parse resources, not a bare Dosage element - wrap the stage array in a throwaway MedicationRequest
+            String wrappedDosages = "{\"resourceType\":\"MedicationRequest\",\"status\":\"active\",\"intent\":\"order\","
+                    + "\"subject\":{\"reference\":\"Patient/cdss-dosing-stage-parser\"},"
+                    + "\"dosageInstruction\":" + administrationInstructions.toString() + "}";
+            MedicationRequest stageRequest = CdssUtils.getFhirJsonParser().parseResource(MedicationRequest.class, wrappedDosages);
+            dosages.addAll(stageRequest.getDosageInstruction());
+        } catch (Exception e) {
+            logger.warn("Could not parse dosing stages for order '" + drugOrder.getUuid()
+                    + "' - falling back to the dosage translated by fhir2", e);
+            return new ArrayList<>();
+        }
+        return dosages;
+    }
+
     private void addDraftMedications(Bundle requestBundle, Bundle medicationBundle) {
         List<Bundle.BundleEntryComponent> medicationEntries = requestBundle.getEntry().stream().filter(entry -> ResourceType.MedicationRequest.equals(entry.getResource().getResourceType())).collect(Collectors.toList());
         medicationEntries.stream().forEach(medicationEntry -> addEntryToMedicationBundle(medicationBundle, (MedicationRequest) medicationEntry.getResource()));
@@ -130,10 +183,11 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
     }
 
     private void resolveFhirDosage(MedicationRequest medicationRequest) {
-        Dosage dosage = medicationRequest.getDosageInstruction().get(0);
-        resolveDoseUnit(dosage);
-        resolveDoseRoute(dosage);
-        resolveFhirDosageFrequency(dosage);
+        for (Dosage dosage : medicationRequest.getDosageInstruction()) {
+            resolveDoseUnit(dosage);
+            resolveDoseRoute(dosage);
+            resolveFhirDosageFrequency(dosage);
+        }
     }
 
     private void resolveFhirDosageFrequency(Dosage dosage) {
@@ -161,6 +215,9 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
     }
 
     private void resolveDoseUnit(Dosage dosage) {
+        if (dosage.getDoseAndRate().isEmpty()) {
+            return;
+        }
         Dosage.DosageDoseAndRateComponent dosageDoseAndRateComponent = dosage.getDoseAndRate().get(0);
         Quantity doseQuantity = dosageDoseAndRateComponent.getDoseQuantity();
         String doseUnit = DosageUnitMapper.getTargetUnit(doseQuantity.getUnit());
@@ -173,6 +230,18 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
 
     private void resolveDoseRoute(Dosage dosage) {
         CodeableConcept dosageRoute = dosage.getRoute();
+        if (dosageRoute == null) {
+            return;
+        }
+        if (dosageRoute.getCoding().isEmpty()) {
+            String routeText = dosageRoute.getText();
+            if (routeText == null || routeText.trim().isEmpty()) {
+                return;
+            }
+            Coding coding = new Coding();
+            coding.setDisplay(routeText);
+            dosageRoute.addCoding(coding);
+        }
         Coding coding = dosageRoute.getCoding().get(0);
         String route = DosageRouteMapper.getTargetRoute(coding.getDisplay());
         if(route == null) {
