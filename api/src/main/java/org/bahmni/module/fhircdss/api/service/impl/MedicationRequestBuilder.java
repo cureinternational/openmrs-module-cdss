@@ -76,6 +76,12 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
                 logger.warn("Skipping non-coded drug order '" + order.getUuid() + "' from CDSS bundle - no coded drug to evaluate.");
                 continue;
             }
+            // CDSS engine expects a single dosage per medication; variable dose protocol orders carry one per stage
+            Class<?> dosingType = ((DrugOrder) order).getDosingType();
+            if (dosingType != null && dosingType.getName().endsWith("FhirDosingInstructions")) {
+                logger.info("Skipping variable dose order '" + order.getUuid() + "' from CDSS bundle.");
+                continue;
+            }
             MedicationRequest medicationRequest = fhirMedicationRequestService.get(order.getUuid());
             CodeableConcept codeableConcept = getCodeableConceptForMedicationRequest(order);
             medicationRequest.setMedication(codeableConcept);
