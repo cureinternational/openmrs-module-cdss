@@ -45,6 +45,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
@@ -353,6 +355,22 @@ public class MedicationRequestBuilderTest {
         List<Bundle.BundleEntryComponent> resultMedicationEntries = medicationBundle.getEntry().stream().filter(entry -> ResourceType.MedicationRequest.equals(entry.getResource().getResourceType())).collect(Collectors.toList());
         assertEquals(5, resultMedicationEntries.size());
     }
+    @Test
+    public void shouldSkipActiveOrder_whenItIsVariableDoseProtocol() throws Exception {
+        Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
+        DrugOrder variableDoseOrder = spy((DrugOrder) getDrugOrder("vdp-order-uuid"));
+        doReturn(FhirDosingInstructions.class).when(variableDoseOrder).getDosingType();
+        when(orderService.getActiveOrders(any(), any(), any(), any())).thenReturn(Collections.singletonList(variableDoseOrder));
+
+        Bundle medicationBundle = medicationRequestBuilder.build(mockRequestBundle);
+
+        assertEquals(mockRequestBundle.getEntry().stream().filter(e -> ResourceType.MedicationRequest.equals(e.getResource().getResourceType())).count(), medicationBundle.getEntry().size());
+    }
+
+    // only the class name is matched by the builder, so a stand-in avoids depending on bahmni-core
+    private static class FhirDosingInstructions {
+    }
+
     @Test
     public void shouldReplaceWithNA_whenDosageUnitsAndRouteOfAdministrationNotPresent() throws Exception {
         Bundle mockRequestBundle = getMockRequestBundle("request_bundle_with_missing_dose_units_and_dose_route.json");
