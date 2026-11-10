@@ -7,6 +7,7 @@ import org.bahmni.module.fhircdss.api.util.OrderFrequencyValue;
 import org.bahmni.module.fhircdss.api.util.DosageRouteMapper;
 import org.bahmni.module.fhircdss.api.util.DosageUnitMapper;
 import org.hl7.fhir.r4.model.Bundle;
+import org.hl7.fhir.r4.model.BooleanType;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Dosage;
@@ -43,6 +44,7 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
 
 
     private static final String DRUG_ORDER = "Drug order";
+    private static final String SKIP_DOSAGE_CHECK_EXTENSION_URL = "https://bahmni.org/fhir/StructureDefinition/skip-dosage-check";
 
     private PatientService patientService;
 
@@ -82,9 +84,17 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
             MedicationRequest medicationRequest = fhirMedicationRequestService.get(order.getUuid());
             CodeableConcept codeableConcept = getCodeableConceptForMedicationRequest(order);
             medicationRequest.setMedication(codeableConcept);
+            if (isVariableDoseProtocolOrder((DrugOrder) order)) {
+                medicationRequest.addExtension(SKIP_DOSAGE_CHECK_EXTENSION_URL, new BooleanType(true));
+            }
             addEntryToMedicationBundle(medicationBundle, medicationRequest);
         }
         return medicationBundle;
+    }
+
+    private boolean isVariableDoseProtocolOrder(DrugOrder order) {
+        Class<?> dosingType = order.getDosingType();
+        return dosingType != null && dosingType.getName().endsWith("FhirDosingInstructions");
     }
 
     private CodeableConcept getCodeableConceptForMedicationRequest(Order order) {
@@ -119,10 +129,19 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
 
     private void addEntryToMedicationBundle(Bundle medicationBundle, MedicationRequest medicationRequest) {
         Bundle.BundleEntryComponent bundleEntryComponent = new Bundle.BundleEntryComponent();
-        resolveFhirDosage(medicationRequest);
+        if (!shouldSkipDosageCheck(medicationRequest)) {
+            resolveFhirDosage(medicationRequest);
+        }
         bundleEntryComponent.setResource(medicationRequest);
         medicationBundle.addEntry(bundleEntryComponent);
 
+    }
+
+    private boolean shouldSkipDosageCheck(MedicationRequest medicationRequest) {
+        return medicationRequest.getExtension().stream()
+                .anyMatch(extension -> SKIP_DOSAGE_CHECK_EXTENSION_URL.equals(extension.getUrl())
+                        && extension.getValue() instanceof BooleanType
+                        && ((BooleanType) extension.getValue()).booleanValue());
     }
 
     private List<Order> getActiveOrders(String patientUuid) {
