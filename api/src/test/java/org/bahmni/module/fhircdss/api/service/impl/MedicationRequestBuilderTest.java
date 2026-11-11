@@ -2,6 +2,7 @@ package org.bahmni.module.fhircdss.api.service.impl;
 
 import ca.uhn.fhir.context.FhirContext;
 import org.hl7.fhir.r4.model.Bundle;
+import org.hl7.fhir.r4.model.BooleanType;
 import org.hl7.fhir.r4.model.CodeableConcept;
 import org.hl7.fhir.r4.model.Coding;
 import org.hl7.fhir.r4.model.Dosage;
@@ -51,6 +52,7 @@ import static org.mockito.Mockito.when;
 
 @RunWith(MockitoJUnitRunner.class)
 public class MedicationRequestBuilderTest {
+    private static final String SKIP_DOSAGE_CHECK_EXTENSION_URL = "https://bahmni.org/fhir/StructureDefinition/skip-dosage-check";
 
     @InjectMocks
     private MedicationRequestBuilder medicationRequestBuilder;
@@ -355,16 +357,26 @@ public class MedicationRequestBuilderTest {
         List<Bundle.BundleEntryComponent> resultMedicationEntries = medicationBundle.getEntry().stream().filter(entry -> ResourceType.MedicationRequest.equals(entry.getResource().getResourceType())).collect(Collectors.toList());
         assertEquals(5, resultMedicationEntries.size());
     }
+
     @Test
-    public void shouldSkipActiveOrder_whenItIsVariableDoseProtocol() throws Exception {
+    public void shouldIncludeActiveVariableDoseProtocolMedicationWithSkipDosageMarker() throws Exception {
         Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
+        MedicationRequest medicationRequest = new MedicationRequest();
+        addDummyDosageInstruction(medicationRequest, "dummy", 2.0, "Unknown VDP frequency");
         DrugOrder variableDoseOrder = spy((DrugOrder) getDrugOrder("vdp-order-uuid"));
         doReturn(FhirDosingInstructions.class).when(variableDoseOrder).getDosingType();
+
         when(orderService.getActiveOrders(any(), any(), any(), any())).thenReturn(Collections.singletonList(variableDoseOrder));
+        when(fhirMedicationRequestService.get(anyString())).thenReturn(medicationRequest);
 
         Bundle medicationBundle = medicationRequestBuilder.build(mockRequestBundle);
 
-        assertEquals(mockRequestBundle.getEntry().stream().filter(e -> ResourceType.MedicationRequest.equals(e.getResource().getResourceType())).count(), medicationBundle.getEntry().size());
+        List<Bundle.BundleEntryComponent> resultMedicationEntries = medicationBundle.getEntry().stream().filter(entry -> ResourceType.MedicationRequest.equals(entry.getResource().getResourceType())).collect(Collectors.toList());
+        MedicationRequest activeVdpRequest = (MedicationRequest) resultMedicationEntries.get(0).getResource();
+        assertEquals(2, resultMedicationEntries.size());
+        assertTrue(activeVdpRequest.hasExtension(SKIP_DOSAGE_CHECK_EXTENSION_URL));
+        assertTrue(((BooleanType) activeVdpRequest.getExtensionByUrl(SKIP_DOSAGE_CHECK_EXTENSION_URL).getValue()).booleanValue());
+        assertEquals("Unknown VDP frequency", getFrequencyTextFromBundleEntry(resultMedicationEntries.get(0)));
     }
 
     // only the class name is matched by the builder, so a stand-in avoids depending on bahmni-core
