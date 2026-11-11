@@ -393,7 +393,7 @@ public class MedicationRequestBuilderTest {
         Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
         MedicationRequest medicationRequest = new MedicationRequest();
         addDummyDosageInstruction(medicationRequest, "ml", 2.0, "Once a day");
-        medicationRequest.getDosageInstruction().get(0).setRoute(new CodeableConcept().addCoding(new Coding()));
+        medicationRequest.getDosageInstruction().get(0).setRoute(new CodeableConcept());
 
         when(orderService.getActiveOrders(any(), any(), any(), any())).thenReturn(getDrugOrders());
         when(fhirMedicationRequestService.get(anyString())).thenReturn(medicationRequest);
