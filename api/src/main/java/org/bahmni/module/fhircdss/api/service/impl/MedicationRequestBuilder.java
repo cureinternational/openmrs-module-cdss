@@ -29,10 +29,7 @@ import org.openmrs.module.fhir2.api.FhirMedicationRequestService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -146,17 +143,9 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
 
     private List<Order> getActiveOrders(String patientUuid) {
         Patient openmrsPatient = patientService.getPatientByUuid(patientUuid);
+        CareSetting careSetting = orderService.getCareSettingByName(CareSetting.CareSettingType.OUTPATIENT.toString());
         OrderType drugOrderType = orderService.getOrderTypeByName(DRUG_ORDER);
-        Map<String, Order> activeOrders = new LinkedHashMap<>();
-        addActiveOrders(activeOrders, openmrsPatient, drugOrderType, CareSetting.CareSettingType.OUTPATIENT);
-        addActiveOrders(activeOrders, openmrsPatient, drugOrderType, CareSetting.CareSettingType.INPATIENT);
-        return new ArrayList<>(activeOrders.values());
-    }
-
-    private void addActiveOrders(Map<String, Order> activeOrders, Patient openmrsPatient, OrderType drugOrderType, CareSetting.CareSettingType careSettingType) {
-        CareSetting careSetting = orderService.getCareSettingByName(careSettingType.toString());
-        orderService.getActiveOrders(openmrsPatient, drugOrderType, careSetting, null)
-                .forEach(order -> activeOrders.put(order.getUuid(), order));
+        return orderService.getActiveOrders(openmrsPatient, drugOrderType, careSetting, null);
     }
 
     private void resolveFhirDosage(MedicationRequest medicationRequest) {
