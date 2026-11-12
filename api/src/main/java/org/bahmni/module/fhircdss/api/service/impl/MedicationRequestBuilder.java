@@ -149,9 +149,6 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
     }
 
     private void resolveFhirDosage(MedicationRequest medicationRequest) {
-        if (!medicationRequest.hasDosageInstruction()) {
-            return;
-        }
         Dosage dosage = medicationRequest.getDosageInstruction().get(0);
         resolveDoseUnit(dosage);
         resolveDoseRoute(dosage);
@@ -183,10 +180,8 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
     }
 
     private void resolveDoseUnit(Dosage dosage) {
-        if (!dosage.hasDoseAndRate() || !dosage.getDoseAndRate().get(0).hasDoseQuantity()) {
-            return;
-        }
-        Quantity doseQuantity = dosage.getDoseAndRate().get(0).getDoseQuantity();
+        Dosage.DosageDoseAndRateComponent dosageDoseAndRateComponent = dosage.getDoseAndRate().get(0);
+        Quantity doseQuantity = dosageDoseAndRateComponent.getDoseQuantity();
         String doseUnit = DosageUnitMapper.getTargetUnit(doseQuantity.getUnit());
         if(doseUnit == null) {
             doseQuantity.setUnit("NA");
@@ -197,13 +192,6 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
 
     private void resolveDoseRoute(Dosage dosage) {
         CodeableConcept dosageRoute = dosage.getRoute();
-        if (!dosageRoute.hasCoding()) {
-            Coding coding = new Coding();
-            coding.setDisplay("NA");
-            dosageRoute.addCoding(coding);
-            dosageRoute.setText("NA");
-            return;
-        }
         Coding coding = dosageRoute.getCoding().get(0);
         String route = DosageRouteMapper.getTargetRoute(coding.getDisplay());
         if(route == null) {
