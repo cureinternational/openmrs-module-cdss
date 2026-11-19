@@ -416,6 +416,23 @@ public class MedicationRequestBuilderTest {
     }
 
     @Test
+    public void shouldSetRouteToNA_whenActiveMedicationHasNoRoute() throws Exception {
+        Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
+        MedicationRequest medicationRequest = new MedicationRequest();
+        addDummyDosageInstruction(medicationRequest, "ml", 2.0, "Once a day");
+        Dosage dosage = spy(medicationRequest.getDosageInstruction().get(0));
+        when(dosage.getRoute()).thenReturn(null).thenCallRealMethod();
+        medicationRequest.setDosageInstruction(Collections.singletonList(dosage));
+
+        when(orderService.getActiveOrders(any(), any(), any(), any())).thenReturn(getDrugOrders());
+        when(fhirMedicationRequestService.get(anyString())).thenReturn(medicationRequest);
+
+        Bundle medicationBundle = medicationRequestBuilder.build(mockRequestBundle);
+
+        assertEquals("NA", getRouteOfAdministrationFromBundleEntry(medicationBundle.getEntry().get(0)));
+    }
+
+    @Test
     public void shouldNotThrowException_whenActiveMedicationHasNoDosageInstruction() throws Exception {
         Bundle mockRequestBundle = getMockRequestBundle("request_bundle.json");
 

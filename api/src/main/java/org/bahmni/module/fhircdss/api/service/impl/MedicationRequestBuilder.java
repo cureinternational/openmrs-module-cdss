@@ -197,6 +197,10 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
 
     private void resolveDoseRoute(Dosage dosage) {
         CodeableConcept dosageRoute = dosage.getRoute();
+        if (dosageRoute == null) {
+            dosageRoute = new CodeableConcept();
+            dosage.setRoute(dosageRoute);
+        }
         if (!dosageRoute.hasCoding()) {
             Coding coding = new Coding();
             coding.setDisplay("NA");
